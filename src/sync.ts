@@ -26,6 +26,7 @@ class UploadConflictError extends Error {
   }
 }
 
+export class SyncEngine {
   private vault: Vault;
   constructor(
     private app: App,
