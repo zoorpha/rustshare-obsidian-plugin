@@ -55,35 +55,36 @@ describe('formatConflictFileName', () => {
 });
 
 describe('shouldIgnorePath', () => {
-  it('returns true for .obsidian/', () => {
-    expect(shouldIgnorePath('.obsidian/app.json')).toBe(true);
-    expect(shouldIgnorePath('.obsidian/')).toBe(true);
+  it('returns true for configDir/', () => {
+    expect(shouldIgnorePath('.obsidian/app.json', '.obsidian')).toBe(true);
+    expect(shouldIgnorePath('.obsidian/', '.obsidian')).toBe(true);
+    expect(shouldIgnorePath('custom-config/app.json', 'custom-config')).toBe(true);
   });
 
   it('returns true for .git/', () => {
-    expect(shouldIgnorePath('.git/config')).toBe(true);
-    expect(shouldIgnorePath('notes/.git/')).toBe(true);
+    expect(shouldIgnorePath('.git/config', '.obsidian')).toBe(true);
+    expect(shouldIgnorePath('notes/.git/', '.obsidian')).toBe(true);
   });
 
   it('returns true for .DS_Store', () => {
-    expect(shouldIgnorePath('.DS_Store')).toBe(true);
-    expect(shouldIgnorePath('folder/.DS_Store')).toBe(true);
+    expect(shouldIgnorePath('.DS_Store', '.obsidian')).toBe(true);
+    expect(shouldIgnorePath('folder/.DS_Store', '.obsidian')).toBe(true);
   });
 
   it('returns true for node_modules/', () => {
-    expect(shouldIgnorePath('node_modules/')).toBe(true);
-    expect(shouldIgnorePath('src/node_modules/pkg/')).toBe(true);
+    expect(shouldIgnorePath('node_modules/', '.obsidian')).toBe(true);
+    expect(shouldIgnorePath('src/node_modules/pkg/', '.obsidian')).toBe(true);
   });
 
   it('returns true for Thumbs.db', () => {
-    expect(shouldIgnorePath('Thumbs.db')).toBe(true);
-    expect(shouldIgnorePath('images/Thumbs.db')).toBe(true);
+    expect(shouldIgnorePath('Thumbs.db', '.obsidian')).toBe(true);
+    expect(shouldIgnorePath('images/Thumbs.db', '.obsidian')).toBe(true);
   });
 
   it('returns false for normal file paths', () => {
-    expect(shouldIgnorePath('notes/hello.md')).toBe(false);
-    expect(shouldIgnorePath('README.md')).toBe(false);
-    expect(shouldIgnorePath('deep/nested/path/file.txt')).toBe(false);
+    expect(shouldIgnorePath('notes/hello.md', '.obsidian')).toBe(false);
+    expect(shouldIgnorePath('README.md', '.obsidian')).toBe(false);
+    expect(shouldIgnorePath('deep/nested/path/file.txt', '.obsidian')).toBe(false);
   });
 });
 

@@ -14,7 +14,7 @@ export class RustShareVaultSyncSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     new Setting(containerEl)
-      .setName('RustShare Vault Sync Settings')
+      .setName('Vault connection')
       .setHeading();
     
     // Disclaimer
@@ -74,7 +74,7 @@ export class RustShareVaultSyncSettingTab extends PluginSettingTab {
         }));
 
     new Setting(containerEl)
-      .setName('Advanced Sync Settings')
+      .setName('Advanced')
       .setHeading();
 
     new Setting(containerEl)

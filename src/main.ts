@@ -92,30 +92,29 @@ export default class RustShareVaultSyncPlugin extends Plugin {
       this.startAutoSync();
     }
 
-    // File event listeners
     this.registerEvent(this.app.vault.on('create', (file) => {
-      if (file instanceof TFile && !shouldIgnorePath(file.path)) {
+      if (file instanceof TFile && !shouldIgnorePath(file.path, this.app.vault.configDir)) {
         syncLog.debug('Event: create', file.path);
         this.syncQueue.add({ path: file.path, type: 'create' });
       }
     }));
 
     this.registerEvent(this.app.vault.on('delete', (file) => {
-      if (file instanceof TFile && !shouldIgnorePath(file.path)) {
+      if (file instanceof TFile && !shouldIgnorePath(file.path, this.app.vault.configDir)) {
         syncLog.debug('Event: delete', file.path);
         this.syncQueue.add({ path: file.path, type: 'delete' });
       }
     }));
 
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
-      if (file instanceof TFile && !shouldIgnorePath(file.path)) {
+      if (file instanceof TFile && !shouldIgnorePath(file.path, this.app.vault.configDir)) {
         syncLog.debug('Event: rename', `${oldPath} -> ${file.path}`);
         this.syncQueue.add({ path: file.path, type: 'rename', oldPath });
       }
     }));
 
     this.registerEvent(this.app.vault.on('modify', (file) => {
-      if (file instanceof TFile && !shouldIgnorePath(file.path)) {
+      if (file instanceof TFile && !shouldIgnorePath(file.path, this.app.vault.configDir)) {
         syncLog.debug('Event: modify', file.path);
         this.syncQueue.add({ path: file.path, type: 'modify' });
       }
@@ -194,7 +193,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
       const maxWaitMs = pairing.expires_in * 1000;
 
       while (Date.now() - startTime < maxWaitMs) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await new Promise(resolve => window.setTimeout(resolve, 3000));
 
         const poll = await api.pollDevicePairing(pairing.device_code);
 

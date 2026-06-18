@@ -32,7 +32,7 @@ export function formatConflictFileName(originalPath: string, deviceName: string,
   return `${dir}${name} (RustShare conflicted copy ${safeDeviceName} ${timestamp})${ext}`;
 }
 
-export function shouldIgnorePath(path: string, configDir = '.obsidian'): boolean {
+export function shouldIgnorePath(path: string, configDir: string): boolean {
   const normalizedConfigDir = configDir.endsWith('/') ? configDir : configDir + '/';
   const ignoredPaths = [
     normalizedConfigDir,
