@@ -1,8 +1,8 @@
 // Obsidian is a trademark of Dynalist Inc. RustShare is not affiliated with, endorsed by, or sponsored by Obsidian.
 // This file is part of RustShare Vault Sync.
 
-import { Plugin, Notice, TFile } from 'obsidian';
-import { RustShareVaultSyncSettings, DEFAULT_SETTINGS, validateSettings } from './settings';
+import { Plugin, Notice, TFile, Platform, FileSystemAdapter } from 'obsidian';
+import { RustShareVaultSyncSettings, DEFAULT_SETTINGS } from './settings';
 import { RustShareVaultSyncSettingTab } from './ui/settings-tab';
 import { StatusBar } from './ui/status-bar';
 import { RustShareAPI } from './api';
@@ -10,7 +10,7 @@ import { SyncEngine } from './sync';
 import { SyncState, createEmptySyncState, migrateSyncState, pruneTombstones } from './state';
 import { SyncQueue, SyncOperation } from './sync-queue';
 import { syncLog } from './sync-log';
-import { generateDeviceId, detectCloudSyncFolder, shouldIgnorePath } from './utils';
+import { detectCloudSyncFolder, shouldIgnorePath } from './utils';
 
 export default class RustShareVaultSyncPlugin extends Plugin {
   declare settings: RustShareVaultSyncSettings;
@@ -25,7 +25,19 @@ export default class RustShareVaultSyncPlugin extends Plugin {
 
     // Generate device name if not set
     if (!this.settings.deviceName) {
-      this.settings.deviceName = `${this.app.vault.getName()} - ${navigator.platform}`;
+      let osName = 'Unknown OS';
+      if (Platform.isMacOS) {
+        osName = 'macOS';
+      } else if (Platform.isWin) {
+        osName = 'Windows';
+      } else if (Platform.isLinux) {
+        osName = 'Linux';
+      } else if (Platform.isIosApp) {
+        osName = 'iOS';
+      } else if (Platform.isAndroidApp) {
+        osName = 'Android';
+      }
+      this.settings.deviceName = `${this.app.vault.getName()} - ${osName}`;
       await this.saveSettings();
     }
 
@@ -56,7 +68,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
 
     // Ribbon icon
     this.addRibbonIcon('cloud', 'RustShare Vault Sync', (evt: MouseEvent) => {
-      this.runManualSync();
+      void this.runManualSync();
     });
 
     // Commands
@@ -120,7 +132,10 @@ export default class RustShareVaultSyncPlugin extends Plugin {
     });
 
     // Check for double-sync warning
-    const vaultPath = (this.app.vault.adapter as any).getBasePath?.() || '';
+    let vaultPath = '';
+    if (this.app.vault.adapter instanceof FileSystemAdapter) {
+      vaultPath = this.app.vault.adapter.getBasePath();
+    }
     const cloudFolder = detectCloudSyncFolder(vaultPath);
     if (cloudFolder) {
       new Notice(
@@ -136,10 +151,10 @@ export default class RustShareVaultSyncPlugin extends Plugin {
   }
 
   async loadSettings() {
-    const data = await this.loadData();
+    const data = (await this.loadData()) as Record<string, unknown> | null;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
-    if (data?.syncState) {
-      this.syncState = migrateSyncState(data.syncState);
+    if (data && data.syncState && typeof data.syncState === 'object') {
+      this.syncState = migrateSyncState(data.syncState as Record<string, unknown>);
     }
   }
 
@@ -213,9 +228,10 @@ export default class RustShareVaultSyncPlugin extends Plugin {
         deviceId = resp.id;
         this.settings.deviceId = deviceId;
         await this.saveSettings();
-      } catch (e: any) {
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
         const isNetworkError = e instanceof TypeError ||
-          /fetch|network|Failed to fetch/i.test(e?.message || '');
+          /fetch|network|Failed to fetch/i.test(message);
 
         if (this.settings.deviceId) {
           deviceId = this.settings.deviceId;
@@ -225,7 +241,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
             console.warn('Using cached device ID, registration failed:', e);
           }
         } else {
-          throw new Error(`Failed to register device: ${e.message || e}`);
+          throw new Error(`Failed to register device: ${message}`);
         }
       }
 
@@ -282,7 +298,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
       }
 
       const api = new RustShareAPI(this.settings.rustshareUrl, this.settings.authToken);
-      const engine = new SyncEngine(this.app.vault, api, this.syncState, this.settings.deviceName);
+      const engine = new SyncEngine(this.app, api, this.syncState, this.settings.deviceName);
 
       try {
         this.statusBar.updateStatus('syncing', 'Syncing...');
@@ -321,7 +337,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
     this.isSyncing = true;
     try {
       const api = new RustShareAPI(this.settings.rustshareUrl, this.settings.authToken);
-      const engine = new SyncEngine(this.app.vault, api, this.syncState, this.settings.deviceName);
+      const engine = new SyncEngine(this.app, api, this.syncState, this.settings.deviceName);
 
       this.statusBar.updateStatus('syncing', 'Syncing...');
       const result = await engine.syncIncremental(ops);
@@ -355,7 +371,9 @@ export default class RustShareVaultSyncPlugin extends Plugin {
   private startAutoSync(): void {
     if (this.syncInterval) return;
     const ms = this.settings.autoSyncIntervalMinutes * 60 * 1000;
-    this.syncInterval = window.setInterval(() => this.runManualSync(), ms);
+    this.syncInterval = window.setInterval(() => {
+      void this.runManualSync();
+    }, ms);
   }
 
   private stopAutoSync(): void {

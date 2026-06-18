@@ -32,17 +32,17 @@ export function formatConflictFileName(originalPath: string, deviceName: string,
   return `${dir}${name} (RustShare conflicted copy ${safeDeviceName} ${timestamp})${ext}`;
 }
 
-export const DEFAULT_IGNORED_PATHS = [
-  '.obsidian/',
-  '.git/',
-  '.DS_Store',
-  'node_modules/',
-  'Thumbs.db',
-  '.rustshare-sync-state.json',
-];
-
-export function shouldIgnorePath(path: string): boolean {
-  for (const ignored of DEFAULT_IGNORED_PATHS) {
+export function shouldIgnorePath(path: string, configDir = '.obsidian'): boolean {
+  const normalizedConfigDir = configDir.endsWith('/') ? configDir : configDir + '/';
+  const ignoredPaths = [
+    normalizedConfigDir,
+    '.git/',
+    '.DS_Store',
+    'node_modules/',
+    'Thumbs.db',
+    '.rustshare-sync-state.json',
+  ];
+  for (const ignored of ignoredPaths) {
     if (ignored.endsWith('/')) {
       // Directory patterns: match at start or after a slash
       if (path.startsWith(ignored) || path.includes('/' + ignored)) return true;

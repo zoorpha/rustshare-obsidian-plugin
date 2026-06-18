@@ -13,7 +13,9 @@ export class RustShareVaultSyncSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: 'RustShare Vault Sync Settings' });
+    new Setting(containerEl)
+      .setName('RustShare Vault Sync Settings')
+      .setHeading();
     
     // Disclaimer
     containerEl.createEl('p', { 
@@ -71,7 +73,9 @@ export class RustShareVaultSyncSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    containerEl.createEl('h3', { text: 'Advanced Sync Settings' });
+    new Setting(containerEl)
+      .setName('Advanced Sync Settings')
+      .setHeading();
 
     new Setting(containerEl)
       .setName('Save debounce (ms)')

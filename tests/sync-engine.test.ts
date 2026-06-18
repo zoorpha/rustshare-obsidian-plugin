@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Vault, TFile } from './mocks/obsidian';
+import { Vault, TFile, App } from './mocks/obsidian';
 import { SyncEngine } from '../src/sync';
 import { createEmptySyncState, SyncState } from '../src/state';
 import { VaultManifest, VaultManifestEntry } from '../src/api';
@@ -105,15 +105,17 @@ class MockAPI {
 
 describe('SyncEngine', () => {
   let vault: Vault;
+  let app: App;
   let api: MockAPI;
   let state: SyncState;
   let engine: SyncEngine;
 
   beforeEach(() => {
     vault = new Vault();
+    app = new App(vault);
     api = new MockAPI();
     state = createEmptySyncState('test-vault', 'device-123', 'test-device');
-    engine = new SyncEngine(vault, api as any, state, 'test-device');
+    engine = new SyncEngine(app as any, api as any, state, 'test-device');
   });
 
   describe('full sync', () => {

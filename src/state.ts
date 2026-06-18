@@ -34,22 +34,26 @@ export function createEmptySyncState(vaultId: string, deviceId: string, deviceNa
   };
 }
 
-export function migrateSyncState(state: Partial<SyncState> & Record<string, any>): SyncState {
-  const version = state.version ?? 0;
+export function migrateSyncState(state: Record<string, unknown>): SyncState {
+  const version = typeof state.version === 'number' ? state.version : 0;
   if (version === 1) {
     // Current version, return as-is with defaults
     return {
       version: 1,
-      vault_id: state.vault_id || '',
-      device_id: state.device_id || '',
-      device_name: state.device_name || '',
-      last_server_rev: state.last_server_rev ?? 0,
-      files: state.files || {},
-      tombstones: state.tombstones || {},
+      vault_id: typeof state.vault_id === 'string' ? state.vault_id : '',
+      device_id: typeof state.device_id === 'string' ? state.device_id : '',
+      device_name: typeof state.device_name === 'string' ? state.device_name : '',
+      last_server_rev: typeof state.last_server_rev === 'number' ? state.last_server_rev : 0,
+      files: (state.files && typeof state.files === 'object') ? (state.files as Record<string, LocalFileState>) : {},
+      tombstones: (state.tombstones && typeof state.tombstones === 'object') ? (state.tombstones as Record<string, TombstoneState>) : {},
     };
   }
   // Future migrations go here
-  return createEmptySyncState(state.vault_id || '', state.device_id || '', state.device_name || '');
+  return createEmptySyncState(
+    typeof state.vault_id === 'string' ? state.vault_id : '',
+    typeof state.device_id === 'string' ? state.device_id : '',
+    typeof state.device_name === 'string' ? state.device_name : ''
+  );
 }
 
 const TOMBSTONE_RETENTION_DAYS = 30;

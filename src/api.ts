@@ -1,5 +1,15 @@
-// Disclaimer: Obsidian is a trademark of Dynalist Inc. RustShare is not affiliated with, endorsed by, or sponsored by Obsidian.
-// RustShare Vault Sync — API client for the RustShare vault sync backend.
+import { requestUrl } from 'obsidian';
+
+export interface APIError extends Error {
+  status?: number;
+  retry_after?: number;
+  error?: string;
+  path?: string;
+  client_rev?: number;
+  current_rev?: number;
+  server_sha256?: string;
+  resolution?: string;
+}
 
 export interface Vault {
   id: string;
@@ -130,14 +140,6 @@ export class RustShareAPI {
     }
   }
 
-  private fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 30000): Promise<Response> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    return fetch(url, { ...init, signal: controller.signal }).finally(() => {
-      clearTimeout(timeout);
-    });
-  }
-
   private async request<T>(method: string, endpoint: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T>;
   private async request(method: string, endpoint: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<unknown> {
     const headers: Record<string, string> = {};
@@ -149,18 +151,27 @@ export class RustShareAPI {
     }
     Object.assign(headers, extraHeaders);
 
-    if (body !== undefined && !(body instanceof ArrayBuffer) && !headers['Content-Type']) {
+    const contentType = headers['Content-Type'];
+    if (body !== undefined && !(body instanceof ArrayBuffer) && !contentType) {
       headers['Content-Type'] = 'application/json';
     }
 
-    const response = await this.fetchWithTimeout(this.buildUrl(endpoint), {
+    const response = await requestUrl({
+      url: this.buildUrl(endpoint),
       method,
       headers,
       body: body instanceof ArrayBuffer ? body : body !== undefined ? JSON.stringify(body) : undefined,
+      contentType: contentType || (body !== undefined && !(body instanceof ArrayBuffer) ? 'application/json' : undefined),
+      throw: false,
     });
 
+    const headersLower = Object.keys(response.headers).reduce((acc, key) => {
+      acc[key.toLowerCase()] = response.headers[key];
+      return acc;
+    }, {} as Record<string, string>);
+
     if (response.status === 409) {
-      const conflict = await response.json().catch(() => ({})) as Partial<ConflictError>;
+      const conflict = (response.json || {}) as Partial<ConflictError>;
       const error: ConflictError = {
         error: 'conflict',
         message: conflict.message ?? 'Conflict detected',
@@ -170,30 +181,30 @@ export class RustShareAPI {
         server_sha256: conflict.server_sha256,
         resolution: conflict.resolution ?? 'create_conflict_copy',
       };
-      const err = new Error(error.message || 'Conflict');
+      const err = new Error(error.message || 'Conflict') as APIError;
       Object.assign(err, error);
       throw err;
     }
 
     if (response.status === 429) {
-      const retryAfter = response.headers.get('retry-after') || response.headers.get('Retry-After');
+      const retryAfter = headersLower['retry-after'];
       let retryAfterSeconds: number | undefined;
       if (retryAfter) {
         const trimmed = retryAfter.trim();
-        // Only parse if it's a pure integer (delta-seconds). Ignore HTTP-date strings.
         if (/^\d+$/.test(trimmed)) {
           retryAfterSeconds = parseInt(trimmed, 10);
         }
       }
-      const text = await response.text();
-      const err = new Error(`HTTP 429: ${text}`);
-      (err as any).status = 429;
-      (err as any).retry_after = retryAfterSeconds;
+      const text = response.text || '';
+      const err = new Error(`HTTP 429: ${text}`) as APIError;
+      err.status = 429;
+      err.retry_after = retryAfterSeconds;
       throw err;
     }
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => 'Unknown error');
+    const isOk = response.status >= 200 && response.status < 300;
+    if (!isOk) {
+      const text = response.text || 'Unknown error';
       throw new Error(`HTTP ${response.status}: ${text}`);
     }
 
@@ -201,12 +212,12 @@ export class RustShareAPI {
       return undefined;
     }
 
-    const contentType = response.headers.get('Content-Type') ?? '';
-    if (contentType.includes('application/json')) {
-      return response.json();
+    const contentTypeHeader = headersLower['content-type'] ?? '';
+    if (contentTypeHeader.includes('application/json')) {
+      return response.json as unknown;
     }
 
-    return response.arrayBuffer();
+    return response.arrayBuffer as unknown;
   }
 
   // Device pairing methods

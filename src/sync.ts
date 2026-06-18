@@ -1,11 +1,11 @@
 // Obsidian is a trademark of Dynalist Inc. RustShare is not affiliated with, endorsed by, or sponsored by Obsidian.
 // This file is part of RustShare Vault Sync.
 
-import { Vault, TFile, normalizePath } from 'obsidian';
+import { Vault, TFile, normalizePath, App } from 'obsidian';
 import { RustShareAPI, VaultManifestEntry } from './api';
 import { SyncState } from './state';
 import { sha256ArrayBuffer, formatConflictFileName, shouldIgnorePath } from './utils';
-import { SyncOperation, SyncOperationType } from './sync-queue';
+import { SyncOperation } from './sync-queue';
 import { syncLog } from './sync-log';
 
 export interface SyncResult {
@@ -26,13 +26,15 @@ class UploadConflictError extends Error {
   }
 }
 
-export class SyncEngine {
+  private vault: Vault;
   constructor(
-    private vault: Vault,
+    private app: App,
     private api: RustShareAPI,
     private state: SyncState,
     private deviceName: string,
-  ) {}
+  ) {
+    this.vault = app.vault;
+  }
 
   async sync(): Promise<SyncResult> {
     // 1. Scan local files
@@ -94,8 +96,7 @@ export class SyncEngine {
       if (!remote) {
         // New file — upload
         try {
-          const resp = await this.uploadFile(path, 0);
-          // resp.server_rev is authoritative
+          await this.uploadFile(path, 0);
           result.uploaded++;
         } catch (e) {
           if (e instanceof UploadConflictError) {
@@ -153,8 +154,7 @@ export class SyncEngine {
         } else if (remote.sha256 === localState.sha256) {
           // Local changed, remote unchanged — upload
           try {
-            const resp = await this.uploadFile(path, remote.server_rev);
-            // resp.server_rev is authoritative
+            await this.uploadFile(path, remote.server_rev);
             result.uploaded++;
           } catch (e) {
             if (e instanceof UploadConflictError) {
@@ -331,11 +331,12 @@ export class SyncEngine {
                   last_synced_at: new Date().toISOString(),
                 };
                 result.uploaded++;
-              } catch (e: any) {
-                if (e.error === 'conflict') {
-                  const serverSha256 = e.server_sha256;
+              } catch (e) {
+                const apiError = e as { error?: string; server_sha256?: string; current_rev?: number } | null;
+                if (apiError && apiError.error === 'conflict') {
+                  const serverSha256 = apiError.server_sha256;
                   try {
-                    await this.handleUploadConflict(op.path, e.current_rev ?? remote.server_rev, serverSha256);
+                    await this.handleUploadConflict(op.path, apiError.current_rev ?? remote.server_rev, serverSha256);
                     result.conflicts++;
                   } catch (conflictErr) {
                     result.errors.push(`Conflict resolution failed: ${op.path}: ${conflictErr}`);
@@ -383,7 +384,7 @@ export class SyncEngine {
       const batch = allFiles.slice(i, i + batchSize);
       await Promise.all(batch.map(async (file) => {
         const path = file.path;
-        if (shouldIgnorePath(path)) return;
+        if (shouldIgnorePath(path, this.vault.configDir)) return;
         if (file instanceof TFile) {
           const buffer = await this.vault.readBinary(file);
           const hash = await sha256ArrayBuffer(buffer);
@@ -391,7 +392,7 @@ export class SyncEngine {
         }
       }));
       // Yield to event loop
-      await new Promise(resolve => setTimeout(resolve, 0));
+      await new Promise(resolve => window.setTimeout(resolve, 0));
     }
     return files;
   }
@@ -406,9 +407,10 @@ export class SyncEngine {
     let resp: { server_rev: number };
     try {
       resp = await this.api.uploadFile(this.state.vault_id, path, buffer, hash, baseServerRev, this.state.device_id);
-    } catch (e: any) {
-      if (e.error === 'conflict') {
-        throw new UploadConflictError(path, e.server_sha256, e.current_rev);
+    } catch (e) {
+      const apiError = e as { error?: string; server_sha256?: string; current_rev?: number } | null;
+      if (apiError && apiError.error === 'conflict') {
+        throw new UploadConflictError(path, apiError.server_sha256, apiError.current_rev);
       }
       throw e;
     }
@@ -449,7 +451,7 @@ export class SyncEngine {
   private async deleteLocalFile(path: string, remoteServerRev?: number): Promise<void> {
     const file = this.vault.getAbstractFileByPath(normalizePath(path));
     if (!(file instanceof TFile)) return;
-    await this.vault.delete(file);
+    await this.app.fileManager.trashFile(file);
     delete this.state.files[path];
     if (remoteServerRev !== undefined) {
       this.state.tombstones[path] = { deleted_at: new Date().toISOString(), server_rev: remoteServerRev };

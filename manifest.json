@@ -3,7 +3,7 @@
   "name": "RustShare Vault Sync",
   "version": "0.1.0",
   "minAppVersion": "0.15.0",
-  "description": "Sync local Obsidian vaults to RustShare. Obsidian is a trademark of Dynalist Inc. RustShare is not affiliated with, endorsed by, or sponsored by Obsidian.",
+  "description": "Sync local vaults to RustShare. RustShare is not affiliated with, endorsed by, or sponsored by Dynalist Inc.",
   "author": "RustShare",
   "authorUrl": "https://rustshare.io",
   "fundingUrl": "",

@@ -1,7 +1,7 @@
 // Obsidian is a trademark of Dynalist Inc. RustShare is not affiliated with, endorsed by, or sponsored by Obsidian.
 // This file is part of RustShare Vault Sync.
 
-import { Plugin, setIcon } from 'obsidian';
+import { Plugin } from 'obsidian';
 
 type SyncStatus = 'disconnected' | 'connected' | 'syncing' | 'synced' | 'conflict' | 'error' | 'offline';
 
@@ -19,8 +19,8 @@ export class StatusBar {
     this.currentStatus = status;
     this.statusBarItemEl.empty();
 
-    const iconEl = this.statusBarItemEl.createEl('span', { cls: 'rustshare-sync-status-icon' });
-    const textEl = this.statusBarItemEl.createEl('span', { text: message || this.statusText(status) });
+    this.statusBarItemEl.createEl('span', { cls: 'rustshare-sync-status-icon' });
+    this.statusBarItemEl.createEl('span', { text: message || this.statusText(status) });
 
     this.statusBarItemEl.removeClass(
       'rustshare-sync-status--disconnected',
