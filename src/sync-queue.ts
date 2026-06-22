@@ -113,13 +113,12 @@ export class SyncQueue {
     try {
       await this.onSync(ops);
       this.retryCount = 0;
-    } catch (error) {
-      const apiError = error as { status?: number; retry_after?: number } | null;
-      if (apiError?.status === 409) {
+    } catch (error: any) {
+      if (error?.status === 409) {
         throw error;
       }
-      if (apiError?.status === 429 && typeof apiError.retry_after === 'number' && !Number.isNaN(apiError.retry_after)) {
-        this.lastRetryAfterMs = apiError.retry_after * 1000;
+      if (error?.status === 429 && typeof error?.retry_after === 'number' && !Number.isNaN(error.retry_after)) {
+        this.lastRetryAfterMs = error.retry_after * 1000;
       }
       if (this.isRetryableError(error)) {
         this.online = false;
@@ -193,9 +192,7 @@ export class SyncQueue {
         return true;
       }
       // 429 Too Many Requests is a retryable network condition
-      // 429 Too Many Requests is a retryable network condition
-      const status = (error as { status?: number }).status;
-      if (status === 429) {
+      if ((error as any).status === 429) {
         return true;
       }
     }
@@ -204,12 +201,11 @@ export class SyncQueue {
 
   private isRetryableError(error: unknown): boolean {
     if (this.isNetworkError(error)) return true;
-    const apiError = error as { status?: number; message?: string } | null;
-    const status = apiError?.status;
+    const status = (error as any)?.status;
     if (status === 429) return true;
     if (typeof status === 'number' && status >= 500 && status < 600) return true;
     // Also check message prefix for HTTP status codes
-    const msg = apiError?.message || '';
+    const msg = (error as any)?.message || '';
     if (/^HTTP 429:/.test(msg)) return true;
     if (/^HTTP 5\d\d:/.test(msg)) return true;
     return false;

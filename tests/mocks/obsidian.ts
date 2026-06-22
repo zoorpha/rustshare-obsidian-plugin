@@ -26,7 +26,6 @@ export function normalizePath(path: string): string {
 }
 
 export class Vault {
-  configDir = '.obsidian';
   private files = new Map<string, TAbstractFile>();
   private contents = new Map<string, ArrayBuffer>();
 
@@ -91,23 +90,12 @@ export class Vault {
   }
 }
 
-export class FileManager {
-  constructor(private vault: Vault) {}
-  async trashFile(file: TAbstractFile): Promise<void> {
-    await this.vault.delete(file);
-  }
-}
-
-export class App {
-  vault: Vault;
-  fileManager: FileManager;
-  constructor(vault: Vault) {
-    this.vault = vault;
-    this.fileManager = new FileManager(vault);
-  }
-}
-
 export class Plugin {}
 export class Notice {}
+export class App {}
 export class PluginSettingTab {}
 export class Setting {}
+
+import { vi } from 'vitest';
+
+export const requestUrl = vi.fn();

@@ -5,6 +5,7 @@ import {
   formatConflictFileName,
   shouldIgnorePath,
   detectCloudSyncFolder,
+  isValidUuid,
 } from '../src/utils';
 
 describe('sha256ArrayBuffer', () => {
@@ -55,36 +56,35 @@ describe('formatConflictFileName', () => {
 });
 
 describe('shouldIgnorePath', () => {
-  it('returns true for configDir/', () => {
-    expect(shouldIgnorePath('.obsidian/app.json', '.obsidian')).toBe(true);
-    expect(shouldIgnorePath('.obsidian/', '.obsidian')).toBe(true);
-    expect(shouldIgnorePath('custom-config/app.json', 'custom-config')).toBe(true);
+  it('returns true for .obsidian/', () => {
+    expect(shouldIgnorePath('.obsidian/app.json')).toBe(true);
+    expect(shouldIgnorePath('.obsidian/')).toBe(true);
   });
 
   it('returns true for .git/', () => {
-    expect(shouldIgnorePath('.git/config', '.obsidian')).toBe(true);
-    expect(shouldIgnorePath('notes/.git/', '.obsidian')).toBe(true);
+    expect(shouldIgnorePath('.git/config')).toBe(true);
+    expect(shouldIgnorePath('notes/.git/')).toBe(true);
   });
 
   it('returns true for .DS_Store', () => {
-    expect(shouldIgnorePath('.DS_Store', '.obsidian')).toBe(true);
-    expect(shouldIgnorePath('folder/.DS_Store', '.obsidian')).toBe(true);
+    expect(shouldIgnorePath('.DS_Store')).toBe(true);
+    expect(shouldIgnorePath('folder/.DS_Store')).toBe(true);
   });
 
   it('returns true for node_modules/', () => {
-    expect(shouldIgnorePath('node_modules/', '.obsidian')).toBe(true);
-    expect(shouldIgnorePath('src/node_modules/pkg/', '.obsidian')).toBe(true);
+    expect(shouldIgnorePath('node_modules/')).toBe(true);
+    expect(shouldIgnorePath('src/node_modules/pkg/')).toBe(true);
   });
 
   it('returns true for Thumbs.db', () => {
-    expect(shouldIgnorePath('Thumbs.db', '.obsidian')).toBe(true);
-    expect(shouldIgnorePath('images/Thumbs.db', '.obsidian')).toBe(true);
+    expect(shouldIgnorePath('Thumbs.db')).toBe(true);
+    expect(shouldIgnorePath('images/Thumbs.db')).toBe(true);
   });
 
   it('returns false for normal file paths', () => {
-    expect(shouldIgnorePath('notes/hello.md', '.obsidian')).toBe(false);
-    expect(shouldIgnorePath('README.md', '.obsidian')).toBe(false);
-    expect(shouldIgnorePath('deep/nested/path/file.txt', '.obsidian')).toBe(false);
+    expect(shouldIgnorePath('notes/hello.md')).toBe(false);
+    expect(shouldIgnorePath('README.md')).toBe(false);
+    expect(shouldIgnorePath('deep/nested/path/file.txt')).toBe(false);
   });
 });
 
@@ -108,5 +108,19 @@ describe('detectCloudSyncFolder', () => {
   it('returns null for non-cloud paths', () => {
     expect(detectCloudSyncFolder('/home/user/vault')).toBeNull();
     expect(detectCloudSyncFolder('C:/Users/me/Documents/Vault')).toBeNull();
+  });
+});
+
+describe('isValidUuid', () => {
+  it('accepts canonical UUIDs', () => {
+    expect(isValidUuid('550e8400-e29b-41d4-a716-446655440000')).toBe(true);
+    expect(isValidUuid('00000000-0000-0000-0000-000000000000')).toBe(true);
+  });
+
+  it('rejects arbitrary strings', () => {
+    expect(isValidUuid('obsidian')).toBe(false);
+    expect(isValidUuid('')).toBe(false);
+    expect(isValidUuid('550e8400-e29b-41d4-a716-44665544000')).toBe(false);
+    expect(isValidUuid('550e8400e29b41d4a716446655440000')).toBe(false);
   });
 });

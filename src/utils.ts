@@ -32,17 +32,17 @@ export function formatConflictFileName(originalPath: string, deviceName: string,
   return `${dir}${name} (RustShare conflicted copy ${safeDeviceName} ${timestamp})${ext}`;
 }
 
-export function shouldIgnorePath(path: string, configDir: string): boolean {
-  const normalizedConfigDir = configDir.endsWith('/') ? configDir : configDir + '/';
-  const ignoredPaths = [
-    normalizedConfigDir,
-    '.git/',
-    '.DS_Store',
-    'node_modules/',
-    'Thumbs.db',
-    '.rustshare-sync-state.json',
-  ];
-  for (const ignored of ignoredPaths) {
+export const DEFAULT_IGNORED_PATHS = [
+  '.obsidian/',
+  '.git/',
+  '.DS_Store',
+  'node_modules/',
+  'Thumbs.db',
+  '.rustshare-sync-state.json',
+];
+
+export function shouldIgnorePath(path: string): boolean {
+  for (const ignored of DEFAULT_IGNORED_PATHS) {
     if (ignored.endsWith('/')) {
       // Directory patterns: match at start or after a slash
       if (path.startsWith(ignored) || path.includes('/' + ignored)) return true;
@@ -60,4 +60,51 @@ export function detectCloudSyncFolder(vaultPath: string): string | null {
     if (vaultPath.includes(indicator)) return indicator;
   }
   return null;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isValidUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}
+
+/**
+ * Best-effort path to the rustshare-desktop token file.
+ * Returns null when the runtime environment is not recognisable.
+ */
+function desktopTokenPath(): string | null {
+  try {
+    const os = require('os');
+    const home = os.homedir();
+    const platform = require('process').platform as string | undefined;
+    switch (platform) {
+      case 'darwin':
+        return `${home}/Library/Application Support/io.rustshare.RustShare/token.txt`;
+      case 'win32':
+        return `${home}\\AppData\\Local\\RustShare\\token.txt`;
+      case 'linux':
+        return `${home}/.local/share/RustShare/token.txt`;
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Try to reuse the token that rustshare-desktop already persisted.
+ * This lets an already-authenticated desktop user skip the Obsidian
+ * device-pairing flow.
+ */
+export function loadDesktopAuthToken(): string | null {
+  const path = desktopTokenPath();
+  if (!path) return null;
+  try {
+    const fs = require('fs');
+    const token = fs.readFileSync(path, 'utf8').trim();
+    return token.length > 0 ? token : null;
+  } catch {
+    return null;
+  }
 }
