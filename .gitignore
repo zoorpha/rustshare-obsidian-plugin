@@ -1,0 +1,11 @@
+# Node modules
+node_modules/
+
+# Built plugin files
+main.js
+
+# OS / Editor files
+.DS_Store
+.vscode/
+.idea/
+*.log

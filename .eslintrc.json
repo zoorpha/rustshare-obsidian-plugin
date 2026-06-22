@@ -1,0 +1,79 @@
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "project": "./tsconfig.json",
+    "tsconfigRootDir": "."
+  },
+  "plugins": [
+    "@typescript-eslint"
+  ],
+  "ignorePatterns": [
+    "vitest.config.ts",
+    "esbuild.config.mjs",
+    "node_modules/",
+    "dist/",
+    "main.js"
+  ],
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "rules": {
+    "@typescript-eslint/no-explicit-any": "error",
+    "no-restricted-globals": [
+      "error",
+      {
+        "name": "navigator",
+        "message": "Use the Platform API instead of navigator to detect the operating system (e.g. Platform.isMobile, Platform.isDesktop)."
+      },
+      {
+        "name": "setTimeout",
+        "message": "Use window.setTimeout() instead of setTimeout() for popout window compatibility."
+      },
+      {
+        "name": "setInterval",
+        "message": "Use window.setInterval() instead of setInterval() for popout window compatibility."
+      }
+    ],
+    "no-restricted-properties": [
+      "error",
+      {
+        "property": "navigator",
+        "message": "Use the Platform API instead of navigator to detect the operating system."
+      }
+    ],
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "CallExpression[callee.property.name=/^(createEl|createElement|createDom)$/][arguments.0.type='Literal'][arguments.0.value=/^h[1-6]$/]",
+        "message": "Do not create HTML heading elements directly. For a consistent UI use new Setting(containerEl).setName(...).setHeading() instead."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/**/*.ts"],
+      "extends": [
+        "plugin:@typescript-eslint/recommended-type-checked"
+      ],
+      "rules": {
+        "@typescript-eslint/no-unsafe-assignment": "error",
+        "@typescript-eslint/no-unsafe-member-access": "error",
+        "@typescript-eslint/no-unsafe-call": "error",
+        "@typescript-eslint/no-unsafe-argument": "error",
+        "@typescript-eslint/no-unsafe-return": "error"
+      }
+    },
+    {
+      "files": ["tests/**/*.ts"],
+      "parserOptions": {
+        "project": null
+      },
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off",
+        "@typescript-eslint/no-unused-vars": "off"
+      }
+    }
+  ]
+}

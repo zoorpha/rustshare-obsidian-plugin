@@ -67,7 +67,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
     this.syncQueue.start();
 
     // Ribbon icon
-    this.addRibbonIcon('cloud', 'RustShare Vault Sync', (evt: MouseEvent) => {
+    this.addRibbonIcon('cloud', 'RustShare Vault Sync', () => {
       void this.runManualSync();
     });
 
