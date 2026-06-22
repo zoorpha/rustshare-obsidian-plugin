@@ -1,7 +1,7 @@
 {
   "id": "rustshare-vault-sync",
   "name": "RustShare Vault Sync",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "minAppVersion": "0.15.0",
   "description": "Sync local vaults to RustShare. RustShare is not affiliated with, endorsed by, or sponsored by Dynalist Inc.",
   "author": "RustShare",

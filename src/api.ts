@@ -226,11 +226,13 @@ export class RustShareAPI {
 
   // Device pairing methods
   async requestDevicePairing(): Promise<DeviceRequestResponse> {
-    return this.request<DeviceRequestResponse>('POST', '/auth/device/request', undefined, undefined, this.buildAuthUrl.bind(this));
+    const builder = (endpoint: string): string => this.buildAuthUrl(endpoint);
+    return this.request<DeviceRequestResponse>('POST', '/auth/device/request', undefined, undefined, builder);
   }
 
   async pollDevicePairing(deviceCode: string): Promise<DevicePollResponse> {
-    return this.request<DevicePollResponse>('POST', '/auth/device/poll', { device_code: deviceCode }, undefined, this.buildAuthUrl.bind(this));
+    const builder = (endpoint: string): string => this.buildAuthUrl(endpoint);
+    return this.request<DevicePollResponse>('POST', '/auth/device/poll', { device_code: deviceCode }, undefined, builder);
   }
 
   // Vault methods

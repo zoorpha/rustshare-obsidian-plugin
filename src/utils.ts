@@ -68,18 +68,34 @@ export function isValidUuid(value: string): boolean {
   return UUID_RE.test(value);
 }
 
+interface OsModule {
+  homedir(): string;
+}
+
+interface ProcessModule {
+  platform: string;
+}
+
+interface FsModule {
+  readFileSync(path: string, options: string): string;
+}
+
+interface RequireWindow extends Window {
+  require?: (id: string) => unknown;
+}
+
 /**
  * Best-effort path to the rustshare-desktop token file.
  * Returns null when the runtime environment is not recognisable.
  */
 function desktopTokenPath(): string | null {
-  const win = window as any;
+  const win = window as RequireWindow;
   if (!win.require) return null;
   try {
-    const os = win.require('os');
-    const home = os.homedir() as string;
-    const process = win.require('process');
-    const platform = process.platform as string | undefined;
+    const os = win.require('os') as OsModule;
+    const home = os.homedir();
+    const process = win.require('process') as ProcessModule;
+    const platform = process.platform;
     switch (platform) {
       case 'darwin':
         return `${home}/Library/Application Support/io.rustshare.RustShare/token.txt`;
@@ -103,11 +119,11 @@ function desktopTokenPath(): string | null {
 export function loadDesktopAuthToken(): string | null {
   const path = desktopTokenPath();
   if (!path) return null;
-  const win = window as any;
+  const win = window as RequireWindow;
   if (!win.require) return null;
   try {
-    const fs = win.require('fs');
-    const token = (fs.readFileSync(path, 'utf8') as string).trim();
+    const fs = win.require('fs') as FsModule;
+    const token = fs.readFileSync(path, 'utf8').trim();
     return token.length > 0 ? token : null;
   } catch {
     return null;
