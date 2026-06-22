@@ -185,8 +185,15 @@ export default class RustShareVaultSyncPlugin extends Plugin {
         const verificationUrl = pairing.verification_uri_complete || pairing.verification_uri;
         const formattedCode = `${pairing.user_code.slice(0, 4)}-${pairing.user_code.slice(4)}`;
 
+        // Copy the code to the clipboard so the user can paste it on the web page.
+        try {
+          await navigator.clipboard.writeText(pairing.user_code);
+        } catch (clipErr) {
+          console.warn('RustShare Vault Sync: could not copy pairing code', clipErr);
+        }
+
         new Notice(
-          `Pairing code: ${formattedCode}. Go to ${verificationUrl} and approve.`,
+          `Pairing code: ${formattedCode} (copied to clipboard). Go to ${verificationUrl} and approve.`,
           30000 // 30 seconds
         );
 
@@ -195,19 +202,32 @@ export default class RustShareVaultSyncPlugin extends Plugin {
         // Step 3: Poll for approval
         const startTime = Date.now();
         const maxWaitMs = pairing.expires_in * 1000;
+        let pollIntervalMs = 20000;
 
         while (Date.now() - startTime < maxWaitMs) {
-          await new Promise(resolve => window.setTimeout(resolve, 3000));
+          await new Promise(resolve => window.setTimeout(resolve, pollIntervalMs));
 
-          const poll = await api.pollDevicePairing(pairing.device_code);
+          try {
+            const poll = await api.pollDevicePairing(pairing.device_code);
 
-          if (poll.status === 'approved') {
-            token = poll.token;
-            break;
-          } else if (poll.status === 'expired') {
-            throw new Error('Pairing code expired. Please try again.');
+            if (poll.status === 'approved') {
+              token = poll.token;
+              break;
+            } else if (poll.status === 'expired') {
+              throw new Error('Pairing code expired. Please try again.');
+            }
+            // status === 'pending' → continue polling
+          } catch (pollErr) {
+            const apiError = pollErr as { status?: number; retry_after?: number } | null;
+            if (apiError && apiError.status === 429) {
+              const retryAfter = typeof apiError.retry_after === 'number' ? apiError.retry_after : 5;
+              console.warn(`RustShare Vault Sync: poll rate-limited, retrying after ${retryAfter}s`);
+              new Notice(`Server is busy. Retrying in ${retryAfter} seconds...`, 3000);
+              pollIntervalMs = Math.min(Math.max(retryAfter * 1000, 20000), 30000);
+              continue;
+            }
+            throw pollErr;
           }
-          // status === 'pending' → continue polling
         }
       }
 
