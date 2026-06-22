@@ -34,6 +34,14 @@ export function createEmptySyncState(vaultId: string, deviceId: string, deviceNa
   };
 }
 
+export function retargetSyncStateDevice(state: SyncState, deviceId: string, deviceName: string): SyncState {
+  return {
+    ...state,
+    device_id: deviceId,
+    device_name: deviceName,
+  };
+}
+
 export function migrateSyncState(state: Record<string, unknown>): SyncState {
   const version = typeof state.version === 'number' ? state.version : 0;
   if (version === 1) {

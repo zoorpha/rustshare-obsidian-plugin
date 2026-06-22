@@ -7,7 +7,7 @@ import { RustShareVaultSyncSettingTab } from './ui/settings-tab';
 import { StatusBar } from './ui/status-bar';
 import { RustShareAPI } from './api';
 import { SyncEngine } from './sync';
-import { SyncState, createEmptySyncState, migrateSyncState, pruneTombstones } from './state';
+import { SyncState, createEmptySyncState, migrateSyncState, pruneTombstones, retargetSyncStateDevice } from './state';
 import { SyncQueue, SyncOperation } from './sync-queue';
 import { syncLog } from './sync-log';
 import { detectCloudSyncFolder, shouldIgnorePath, loadDesktopAuthToken, isValidUuid } from './utils';
@@ -294,10 +294,13 @@ export default class RustShareVaultSyncPlugin extends Plugin {
       }
 
       // Initialize sync state
-      if (!this.syncState || this.syncState.vault_id !== vaultId || this.syncState.device_id !== deviceId) {
+      if (this.syncState?.vault_id === vaultId && this.syncState.device_id !== deviceId) {
+        this.syncState = retargetSyncStateDevice(this.syncState, deviceId, this.settings.deviceName);
+      } else if (!this.syncState || this.syncState.vault_id !== vaultId) {
         this.syncState = createEmptySyncState(vaultId, deviceId, this.settings.deviceName);
       }
 
+      await this.saveSettings();
       this.statusBar.updateStatus('connected');
     } catch (e) {
       this.statusBar.updateStatus('error', `Connect failed: ${e}`);
