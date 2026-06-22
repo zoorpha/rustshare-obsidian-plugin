@@ -10,7 +10,7 @@ import { SyncEngine } from './sync';
 import { SyncState, createEmptySyncState, migrateSyncState, pruneTombstones } from './state';
 import { SyncQueue, SyncOperation } from './sync-queue';
 import { syncLog } from './sync-log';
-import { detectCloudSyncFolder, shouldIgnorePath } from './utils';
+import { detectCloudSyncFolder, shouldIgnorePath, loadDesktopAuthToken, isValidUuid } from './utils';
 
 export default class RustShareVaultSyncPlugin extends Plugin {
   declare settings: RustShareVaultSyncSettings;
@@ -171,39 +171,44 @@ export default class RustShareVaultSyncPlugin extends Plugin {
     const api = new RustShareAPI(this.settings.rustshareUrl, ''); // no token yet
 
     try {
-      this.statusBar.updateStatus('syncing', 'Requesting device pairing...');
+      // Try to load token from desktop app first
+      const desktopToken = loadDesktopAuthToken();
+      let token: string | null = desktopToken;
 
-      // Step 1: Request device pairing
-      const pairing = await api.requestDevicePairing();
+      if (!token) {
+        this.statusBar.updateStatus('syncing', 'Requesting device pairing...');
 
-      // Step 2: Show pairing code to user
-      const verificationUrl = pairing.verification_uri_complete || pairing.verification_uri;
-      const formattedCode = `${pairing.user_code.slice(0, 4)}-${pairing.user_code.slice(4)}`;
+        // Step 1: Request device pairing
+        const pairing = await api.requestDevicePairing();
 
-      new Notice(
-        `Pairing code: ${formattedCode}. Go to ${verificationUrl} and approve.`,
-        30000 // 30 seconds
-      );
+        // Step 2: Show pairing code to user
+        const verificationUrl = pairing.verification_uri_complete || pairing.verification_uri;
+        const formattedCode = `${pairing.user_code.slice(0, 4)}-${pairing.user_code.slice(4)}`;
 
-      this.statusBar.updateStatus('syncing', `Waiting for approval (code: ${formattedCode})...`);
+        new Notice(
+          `Pairing code: ${formattedCode}. Go to ${verificationUrl} and approve.`,
+          30000 // 30 seconds
+        );
 
-      // Step 3: Poll for approval
-      let token: string | null = null;
-      const startTime = Date.now();
-      const maxWaitMs = pairing.expires_in * 1000;
+        this.statusBar.updateStatus('syncing', `Waiting for approval (code: ${formattedCode})...`);
 
-      while (Date.now() - startTime < maxWaitMs) {
-        await new Promise(resolve => window.setTimeout(resolve, 3000));
+        // Step 3: Poll for approval
+        const startTime = Date.now();
+        const maxWaitMs = pairing.expires_in * 1000;
 
-        const poll = await api.pollDevicePairing(pairing.device_code);
+        while (Date.now() - startTime < maxWaitMs) {
+          await new Promise(resolve => window.setTimeout(resolve, 3000));
 
-        if (poll.status === 'approved') {
-          token = poll.token;
-          break;
-        } else if (poll.status === 'expired') {
-          throw new Error('Pairing code expired. Please try again.');
+          const poll = await api.pollDevicePairing(pairing.device_code);
+
+          if (poll.status === 'approved') {
+            token = poll.token;
+            break;
+          } else if (poll.status === 'expired') {
+            throw new Error('Pairing code expired. Please try again.');
+          }
+          // status === 'pending' → continue polling
         }
-        // status === 'pending' → continue polling
       }
 
       if (!token) {
@@ -246,10 +251,14 @@ export default class RustShareVaultSyncPlugin extends Plugin {
 
       // Create or use existing vault
       let vaultId = this.settings.vaultId;
+      if (vaultId && !isValidUuid(vaultId)) {
+        new Notice('Stored vault ID is invalid. Re-connecting and creating a new vault.');
+        vaultId = '';
+      }
       if (!vaultId) {
         const vault = await authedApi.createVault({
           name: this.app.vault.getName(),
-          adapter: 'obsidian_vault',
+          adapter: 'ObsidianVault',
           client_vault_id: undefined,
           device_id: this.settings.deviceId,
         });

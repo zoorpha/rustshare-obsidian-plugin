@@ -1,5 +1,9 @@
 // Mock Obsidian API for testing
 
+if (typeof window === 'undefined') {
+  (global as any).window = global;
+}
+
 export class TAbstractFile {
   path: string;
   name: string;
@@ -111,3 +115,7 @@ export class Plugin {}
 export class Notice {}
 export class PluginSettingTab {}
 export class Setting {}
+
+import { vi } from 'vitest';
+
+export const requestUrl = vi.fn();
