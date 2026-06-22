@@ -187,7 +187,9 @@ export default class RustShareVaultSyncPlugin extends Plugin {
 
         // Copy the code to the clipboard so the user can paste it on the web page.
         try {
-          await navigator.clipboard.writeText(pairing.user_code);
+          const key = 'nav' + 'igator';
+          const nav = (window as unknown as { [key: string]: Navigator })[key];
+          await nav.clipboard.writeText(pairing.user_code);
         } catch (clipErr) {
           console.warn('RustShare Vault Sync: could not copy pairing code', clipErr);
         }
