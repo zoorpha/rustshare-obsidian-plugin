@@ -14,6 +14,10 @@ export interface SyncQueueOptions {
   maxRetries: number;
   retryBaseDelayMs: number;
   retryMaxDelayMs: number;
+  /** Persist the currently queued ops so they survive a plugin reload. */
+  saveQueue?: (ops: SyncOperation[]) => void | Promise<void>;
+  /** Restore previously persisted ops on startup. */
+  loadQueue?: () => SyncOperation[] | Promise<SyncOperation[]>;
 }
 
 export class SyncQueue {
@@ -29,7 +33,7 @@ export class SyncQueue {
 
   constructor(
     private options: SyncQueueOptions,
-    private onSync: (ops: SyncOperation[]) => Promise<void>,
+    private onSync: (ops: SyncOperation[]) => Promise<SyncOperation[] | void>,
   ) {}
 
   add(op: SyncOperation): void {
@@ -50,6 +54,7 @@ export class SyncQueue {
 
     this.pending.set(op.path, op);
     this.scheduleRun();
+    void this.persistQueue();
   }
 
   flush(): void {
@@ -59,6 +64,7 @@ export class SyncQueue {
 
   start(): void {
     this.active = true;
+    void this.loadPersistedQueue();
   }
 
   stop(): void {
@@ -80,6 +86,7 @@ export class SyncQueue {
         this.pending.set(op.path, op);
       }
       this.offlineQueue = [];
+      void this.persistQueue();
       this.flush();
     }
   }
@@ -109,28 +116,32 @@ export class SyncQueue {
 
     this.pending.clear();
     this.isRunning = true;
+    void this.persistQueue();
 
     try {
-      await this.onSync(ops);
+      // onSync resolves with the ops that did not complete; only those are
+      // replayed so already-succeeded ops (e.g. an uploaded create) are
+      // never re-executed against the server.
+      const failedOps = (await this.onSync(ops)) ?? [];
       this.retryCount = 0;
+      if (failedOps.length > 0) {
+        this.enqueueRetry(failedOps, true);
+      }
     } catch (error) {
       const apiError = error as { status?: number; retry_after?: number } | null;
-      if (apiError?.status === 409) {
-        throw error;
-      }
       if (apiError?.status === 429 && typeof apiError.retry_after === 'number' && !Number.isNaN(apiError.retry_after)) {
         this.lastRetryAfterMs = apiError.retry_after * 1000;
       }
-      if (this.isRetryableError(error)) {
+      if (this.isServerError(error)) {
+        // Transient server errors (5xx/429) are not "offline": keep retrying
+        // with bounded backoff that resets after success, without the
+        // maxRetries stop.
+        this.enqueueRetry(ops, true);
+      } else if (this.isNetworkError(error)) {
+        // Genuinely offline: mark it so window.online can also recover the
+        // queue, and cap retries at maxRetries.
         this.online = false;
-        const maxOfflineQueue = 1000;
-        if (this.offlineQueue.length + ops.length > maxOfflineQueue) {
-          const toDrop = this.offlineQueue.length + ops.length - maxOfflineQueue;
-          this.offlineQueue = this.offlineQueue.slice(toDrop);
-          console.warn(`Dropped ${toDrop} oldest operations from offline queue (max ${maxOfflineQueue})`);
-        }
-        this.offlineQueue.push(...ops);
-        this.scheduleRetry();
+        this.enqueueRetry(ops, false);
       } else {
         console.error('Sync queue error (non-retryable):', error);
       }
@@ -139,9 +150,21 @@ export class SyncQueue {
     }
   }
 
-  private scheduleRetry(): void {
+  private enqueueRetry(ops: SyncOperation[], serverError: boolean): void {
+    const maxOfflineQueue = 1000;
+    if (this.offlineQueue.length + ops.length > maxOfflineQueue) {
+      const toDrop = this.offlineQueue.length + ops.length - maxOfflineQueue;
+      this.offlineQueue = this.offlineQueue.slice(toDrop);
+      console.warn(`Dropped ${toDrop} oldest operations from offline queue (max ${maxOfflineQueue})`);
+    }
+    this.offlineQueue.push(...ops);
+    void this.persistQueue();
+    this.scheduleRetry(serverError);
+  }
+
+  private scheduleRetry(serverError: boolean): void {
     if (!this.active) return;
-    if (this.retryCount >= this.options.maxRetries) return;
+    if (!serverError && this.retryCount >= this.options.maxRetries) return;
     this.clearRetryTimer();
     let delay: number;
     if (this.lastRetryAfterMs !== undefined && !Number.isNaN(this.lastRetryAfterMs)) {
@@ -157,6 +180,7 @@ export class SyncQueue {
         this.pending.set(op.path, op);
       }
       this.offlineQueue = [];
+      void this.persistQueue();
       void this.runSync();
     }, delay);
   }
@@ -180,6 +204,27 @@ export class SyncQueue {
     }
   }
 
+  private async persistQueue(): Promise<void> {
+    if (!this.options.saveQueue) return;
+    try {
+      await this.options.saveQueue([...this.pending.values(), ...this.offlineQueue]);
+    } catch (error) {
+      console.error('Sync queue: failed to persist queue:', error);
+    }
+  }
+
+  private async loadPersistedQueue(): Promise<void> {
+    if (!this.options.loadQueue) return;
+    try {
+      const loaded = await this.options.loadQueue();
+      if (!loaded || loaded.length === 0) return;
+      this.offlineQueue.push(...loaded);
+      this.scheduleRetry(false);
+    } catch (error) {
+      console.error('Sync queue: failed to load persisted queue:', error);
+    }
+  }
+
   private isNetworkError(error: unknown): boolean {
     if (error instanceof TypeError) return true;
     if (error instanceof Error) {
@@ -193,7 +238,6 @@ export class SyncQueue {
         return true;
       }
       // 429 Too Many Requests is a retryable network condition
-      // 429 Too Many Requests is a retryable network condition
       const status = (error as { status?: number }).status;
       if (status === 429) {
         return true;
@@ -202,8 +246,7 @@ export class SyncQueue {
     return false;
   }
 
-  private isRetryableError(error: unknown): boolean {
-    if (this.isNetworkError(error)) return true;
+  private isServerError(error: unknown): boolean {
     const apiError = error as { status?: number; message?: string } | null;
     const status = apiError?.status;
     if (status === 429) return true;

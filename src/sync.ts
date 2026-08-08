@@ -14,6 +14,8 @@ export interface SyncResult {
   deleted: number;
   conflicts: number;
   errors: string[];
+  /** Ops that did not complete, so the caller can retry only those. */
+  failedOps: SyncOperation[];
 }
 
 class UploadConflictError extends Error {
@@ -52,7 +54,7 @@ export class SyncEngine {
     }
 
     // 4. Compare and sync
-    const result: SyncResult = { uploaded: 0, downloaded: 0, deleted: 0, conflicts: 0, errors: [] };
+    const result: SyncResult = { uploaded: 0, downloaded: 0, deleted: 0, conflicts: 0, errors: [], failedOps: [] };
 
     // Rename detection: find files that moved but kept their hash
     const detectedRenames = this.detectHashMatchRenames(localFiles);
@@ -123,9 +125,11 @@ export class SyncEngine {
             result.errors.push(`Delete failed: ${path}: ${e}`);
           }
         } else {
-          // Local changed — conflict
+          // Local changed while remote is deleted — preserve the local edits
+          // as a conflict copy and tombstone the path so later syncs do not
+          // trash the file or keep producing conflict copies.
           try {
-            await this.handleUploadConflict(path, remote.server_rev, remote.sha256, localHash);
+            await this.handleRemoteDeleteConflict(path, remote.server_rev);
             result.conflicts++;
           } catch (e) {
             result.errors.push(`Conflict resolution failed: ${path}: ${e}`);
@@ -139,7 +143,7 @@ export class SyncEngine {
         if (!localState) {
           // Fresh/empty sync state — don't destroy local data, treat as conflict
           try {
-            await this.handleUploadConflict(path, remote.server_rev, remote.sha256, localHash);
+            await this.handleUploadConflict(path, remote.server_rev, remote.sha256);
             result.conflicts++;
           } catch (e) {
             result.errors.push(`Conflict resolution failed: ${path}: ${e}`);
@@ -172,7 +176,7 @@ export class SyncEngine {
         } else {
           // Both changed — conflict
           try {
-            await this.handleUploadConflict(path, remote.server_rev, remote.sha256, localHash);
+            await this.handleUploadConflict(path, remote.server_rev, remote.sha256);
             result.conflicts++;
           } catch (e) {
             result.errors.push(`Conflict resolution failed: ${path}: ${e}`);
@@ -183,6 +187,10 @@ export class SyncEngine {
 
     // Download remote-only files, propagate local deletions, or clean up remote tombstones
     for (const [path, remote] of remoteFiles) {
+      // Apply ignore rules symmetrically: paths excluded from scans/uploads
+      // must also be excluded from downloads and delete propagation.
+      if (shouldIgnorePath(path, this.vault.configDir)) continue;
+
       if (remote.deleted) {
         if (!localFiles.has(path) && this.state.files[path]) {
           // File was previously synced but is now deleted remotely and locally gone.
@@ -221,7 +229,7 @@ export class SyncEngine {
   }
 
   async syncIncremental(operations: SyncOperation[]): Promise<SyncResult> {
-    const result: SyncResult = { uploaded: 0, downloaded: 0, deleted: 0, conflicts: 0, errors: [] };
+    const result: SyncResult = { uploaded: 0, downloaded: 0, deleted: 0, conflicts: 0, errors: [], failedOps: [] };
 
     const manifest = await this.api.getManifest(this.state.vault_id);
     this.state.last_server_rev = manifest.server_rev;
@@ -260,12 +268,10 @@ export class SyncEngine {
                 syncLog.warn(`File not found for rename fallback upload: ${op.path}`);
                 continue;
               }
-              const buffer = await this.vault.readBinary(file);
-              const hash = await sha256ArrayBuffer(buffer);
               const remote = remoteFiles.get(op.path);
 
               if (remote?.deleted) {
-                await this.handleUploadConflict(op.path, remote.server_rev, remote.sha256, hash);
+                await this.handleRemoteDeleteConflict(op.path, remote.server_rev);
                 result.conflicts++;
               } else {
                 try {
@@ -321,7 +327,7 @@ export class SyncEngine {
             } else if (remote.deleted) {
               // changed + deleted = conflict
               syncLog.info(`Conflict: local ${op.type} vs remote delete for ${op.path}`);
-              await this.handleUploadConflict(op.path, remote.server_rev, remote.sha256, hash);
+              await this.handleRemoteDeleteConflict(op.path, remote.server_rev);
               result.conflicts++;
             } else {
               try {
@@ -341,9 +347,11 @@ export class SyncEngine {
                     result.conflicts++;
                   } catch (conflictErr) {
                     result.errors.push(`Conflict resolution failed: ${op.path}: ${conflictErr}`);
+                    result.failedOps.push(op);
                   }
                 } else {
                   result.errors.push(`Upload failed: ${op.path}: ${e}`);
+                  result.failedOps.push(op);
                 }
               }
             }
@@ -352,6 +360,7 @@ export class SyncEngine {
         }
       } catch (e) {
         result.errors.push(`Operation failed (${op.type} ${op.path}): ${e}`);
+        result.failedOps.push(op);
       }
     }
 
@@ -424,10 +433,7 @@ export class SyncEngine {
 
     // Verify downloaded content integrity
     if (remote.sha256) {
-      const computedHash = await sha256ArrayBuffer(data);
-      if (computedHash !== remote.sha256) {
-        throw new Error(`SHA-256 mismatch for ${path}: expected ${remote.sha256}, got ${computedHash}`);
-      }
+      await this.verifyDownloadedContent(path, data, remote.sha256);
     }
 
     const normalizedPath = normalizePath(path);
@@ -474,35 +480,41 @@ export class SyncEngine {
     await this.vault.copy(file, normalizePath(conflictName));
   }
 
-  private async handleUploadConflict(path: string, remoteRev: number, remoteSha256?: string, localHash?: string): Promise<void> {
+  private async handleUploadConflict(path: string, remoteRev: number, remoteSha256?: string): Promise<void> {
     await this.createConflictCopy(path);
-    if (remoteSha256) {
-      const data = await this.api.downloadFile(this.state.vault_id, path);
-      const normalizedPath = normalizePath(path);
-      const lastSlash = normalizedPath.lastIndexOf('/');
-      if (lastSlash > 0) {
-        const dir = normalizedPath.slice(0, lastSlash);
-        await this.vault.adapter.mkdir(normalizePath(dir));
-      }
-      await this.vault.adapter.writeBinary(normalizedPath, data);
-      const hash = remoteSha256 ?? await sha256ArrayBuffer(data);
-      this.state.files[path] = {
-        sha256: hash,
-        server_rev: remoteRev,
-        last_synced_at: new Date().toISOString(),
-      };
-    } else {
-      // Server file is tombstoned; our local version wins as conflict copy
-      // The original path can be re-uploaded on next sync
-      console.log(`Server file ${path} is deleted; local version saved as conflict copy`);
-      // Update state so we don't re-conflict on next sync
-      if (localHash) {
-        this.state.files[path] = {
-          sha256: localHash,
-          server_rev: remoteRev,
-          last_synced_at: new Date().toISOString(),
-        };
-      }
+    if (!remoteSha256) return;
+    const data = await this.api.downloadFile(this.state.vault_id, path);
+    await this.verifyDownloadedContent(path, data, remoteSha256);
+
+    const normalizedPath = normalizePath(path);
+    const lastSlash = normalizedPath.lastIndexOf('/');
+    if (lastSlash > 0) {
+      const dir = normalizedPath.slice(0, lastSlash);
+      await this.vault.adapter.mkdir(normalizePath(dir));
+    }
+    await this.vault.adapter.writeBinary(normalizedPath, data);
+    this.state.files[path] = {
+      sha256: remoteSha256,
+      server_rev: remoteRev,
+      last_synced_at: new Date().toISOString(),
+    };
+  }
+
+  private async handleRemoteDeleteConflict(path: string, remoteRev: number): Promise<void> {
+    await this.createConflictCopy(path);
+    // The remote entry is tombstoned: the server rejects both uploads
+    // (409 Conflict) and downloads (404) for tombstoned paths, so the
+    // user's local edits can only survive as a conflict copy plus the
+    // untouched local file. Record a tombstone so later syncs neither
+    // trash the local file nor keep producing conflict copies.
+    delete this.state.files[path];
+    this.state.tombstones[path] = { deleted_at: new Date().toISOString(), server_rev: remoteRev };
+  }
+
+  private async verifyDownloadedContent(path: string, data: ArrayBuffer, expectedSha256: string): Promise<void> {
+    const computedHash = await sha256ArrayBuffer(data);
+    if (computedHash !== expectedSha256) {
+      throw new Error(`SHA-256 mismatch for ${path}: expected ${expectedSha256}, got ${computedHash}`);
     }
   }
 

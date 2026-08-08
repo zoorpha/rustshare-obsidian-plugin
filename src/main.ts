@@ -6,7 +6,7 @@ import { RustShareVaultSyncSettings, DEFAULT_SETTINGS } from './settings';
 import { RustShareVaultSyncSettingTab } from './ui/settings-tab';
 import { StatusBar } from './ui/status-bar';
 import { RustShareAPI } from './api';
-import { SyncEngine } from './sync';
+import { SyncEngine, SyncResult } from './sync';
 import { SyncState, createEmptySyncState, migrateSyncState, pruneTombstones, retargetSyncStateDevice } from './state';
 import { SyncQueue, SyncOperation } from './sync-queue';
 import { syncLog } from './sync-log';
@@ -19,6 +19,8 @@ export default class RustShareVaultSyncPlugin extends Plugin {
   private syncQueue: SyncQueue;
   private syncInterval: number | null = null;
   private isSyncing = false;
+  /** Suppresses vault events raised by the plugin's own sync writes/deletes. */
+  private isApplyingSync = false;
 
   async onload() {
     await this.loadSettings();
@@ -51,6 +53,11 @@ export default class RustShareVaultSyncPlugin extends Plugin {
         maxRetries: this.settings.maxRetries,
         retryBaseDelayMs: this.settings.retryBaseDelayMs,
         retryMaxDelayMs: 60000,
+        saveQueue: async (ops) => {
+          this.settings.pendingSyncOps = ops;
+          await this.saveSettings();
+        },
+        loadQueue: () => this.settings.pendingSyncOps ?? [],
       },
       async (ops: SyncOperation[]) => {
         if (!this.settings.vaultId) {
@@ -61,7 +68,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
           syncLog.debug('Sync queue: full sync in progress, skipping incremental');
           return;
         }
-        await this.runIncrementalSync(ops);
+        return this.runIncrementalSync(ops);
       }
     );
     this.syncQueue.start();
@@ -93,6 +100,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
     }
 
     this.registerEvent(this.app.vault.on('create', (file) => {
+      if (this.isApplyingSync) return;
       if (file instanceof TFile && !shouldIgnorePath(file.path, this.app.vault.configDir)) {
         syncLog.debug('Event: create', file.path);
         this.syncQueue.add({ path: file.path, type: 'create' });
@@ -100,6 +108,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
     }));
 
     this.registerEvent(this.app.vault.on('delete', (file) => {
+      if (this.isApplyingSync) return;
       if (file instanceof TFile && !shouldIgnorePath(file.path, this.app.vault.configDir)) {
         syncLog.debug('Event: delete', file.path);
         this.syncQueue.add({ path: file.path, type: 'delete' });
@@ -107,6 +116,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
     }));
 
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+      if (this.isApplyingSync) return;
       if (file instanceof TFile && !shouldIgnorePath(file.path, this.app.vault.configDir)) {
         syncLog.debug('Event: rename', `${oldPath} -> ${file.path}`);
         this.syncQueue.add({ path: file.path, type: 'rename', oldPath });
@@ -114,6 +124,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
     }));
 
     this.registerEvent(this.app.vault.on('modify', (file) => {
+      if (this.isApplyingSync) return;
       if (file instanceof TFile && !shouldIgnorePath(file.path, this.app.vault.configDir)) {
         syncLog.debug('Event: modify', file.path);
         this.syncQueue.add({ path: file.path, type: 'modify' });
@@ -335,7 +346,16 @@ export default class RustShareVaultSyncPlugin extends Plugin {
 
       try {
         this.statusBar.updateStatus('syncing', 'Syncing...');
-        const result = await engine.sync();
+        // Suppress vault events raised by the engine's own writes/deletes
+        // (downloads, conflict copies, local trashes) so they are not
+        // re-queued as redundant sync ops.
+        let result: SyncResult;
+        this.isApplyingSync = true;
+        try {
+          result = await engine.sync();
+        } finally {
+          this.isApplyingSync = false;
+        }
 
         await this.saveSettings();
         if (this.syncState) {
@@ -362,7 +382,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
     }
   }
 
-  private async runIncrementalSync(ops: SyncOperation[]): Promise<void> {
+  private async runIncrementalSync(ops: SyncOperation[]): Promise<SyncOperation[] | void> {
     if (!this.settings.vaultId || !this.syncState) {
       syncLog.debug('Incremental sync: no vault or state');
       return;
@@ -373,7 +393,15 @@ export default class RustShareVaultSyncPlugin extends Plugin {
       const engine = new SyncEngine(this.app, api, this.syncState, this.settings.deviceName);
 
       this.statusBar.updateStatus('syncing', 'Syncing...');
-      const result = await engine.syncIncremental(ops);
+      // Suppress vault events raised by the engine's own writes/deletes so
+      // they are not re-queued as redundant sync ops.
+      let result: SyncResult;
+      this.isApplyingSync = true;
+      try {
+        result = await engine.syncIncremental(ops);
+      } finally {
+        this.isApplyingSync = false;
+      }
       await this.saveSettings();
       if (this.syncState) {
         pruneTombstones(this.syncState);
@@ -392,6 +420,7 @@ export default class RustShareVaultSyncPlugin extends Plugin {
         syncLog.info(msg);
       }
       this.syncQueue.setOnline(true);
+      return result.failedOps;
     } catch (e) {
       this.statusBar.updateStatus('error', `Incremental sync failed: ${e}`);
       syncLog.error('Incremental sync failed', undefined, String(e));

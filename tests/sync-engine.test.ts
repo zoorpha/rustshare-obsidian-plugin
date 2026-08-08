@@ -40,6 +40,8 @@ class MockAPI {
   downloads: Array<{ path: string }> = [];
   deletes: Array<{ path: string; rev: number }> = [];
   renames: Array<{ oldPath: string; newPath: string }> = [];
+  /** Per-path download payloads; falls back to 'remote content'. */
+  downloadContents: Record<string, ArrayBuffer> = {};
   manifest: VaultManifest = {
     vault_id: 'test-vault',
     adapter: 'obsidian_vault',
@@ -76,7 +78,7 @@ class MockAPI {
 
   async downloadFile(_vaultId: string, path: string): Promise<ArrayBuffer> {
     this.downloads.push({ path });
-    return makeBuffer('remote content');
+    return this.downloadContents[path] ?? makeBuffer('remote content');
   }
 
   async deleteFile(
@@ -217,6 +219,37 @@ describe('SyncEngine', () => {
       expect(conflictFile).toBeDefined();
     });
 
+    it('does not trash local edits across two syncs when remote deleted and local changed', async () => {
+      vault.addFile('notes/gone.md', 'new content');
+      const localHash = await hash('new content');
+      state.files['notes/gone.md'] = {
+        sha256: await hash('old content'),
+        server_rev: 1,
+        last_synced_at: new Date().toISOString(),
+      };
+      api.manifest.files.push(
+        makeManifestEntry('notes/gone.md', { server_rev: 2, deleted: true })
+      );
+
+      await engine.sync();
+      await engine.sync();
+
+      // The user's file must survive the second sync (regression: it was
+      // trashed because the local hash was recorded as synced state).
+      expect(vault.getAbstractFileByPath('notes/gone.md')).toBeInstanceOf(TFile);
+      expect(await readText(vault, 'notes/gone.md')).toBe('new content');
+      const files = vault.getFiles();
+      expect(files.length).toBe(2);
+      const conflictFile = files.find((f) => f.path.includes('conflicted copy'));
+      expect(conflictFile).toBeDefined();
+      expect(await readText(vault, conflictFile!.path)).toBe('new content');
+      // No local delete propagated, and the path is tombstoned so the upload
+      // loop stops re-conflicting with the remote tombstone.
+      expect(api.deletes).toHaveLength(0);
+      expect(state.files['notes/gone.md']).toBeUndefined();
+      expect(state.tombstones['notes/gone.md']).toBeDefined();
+    });
+
     it('creates conflict copy when both local and remote changed', async () => {
       vault.addFile('notes/both.md', 'local B');
       state.files['notes/both.md'] = {
@@ -224,6 +257,7 @@ describe('SyncEngine', () => {
         server_rev: 1,
         last_synced_at: new Date().toISOString(),
       };
+      api.downloadContents['notes/both.md'] = makeBuffer('remote C');
       api.manifest.files.push(
         makeManifestEntry('notes/both.md', {
           sha256: await hash('remote C'),
@@ -238,6 +272,9 @@ describe('SyncEngine', () => {
       expect(files.length).toBe(2);
       const conflictFile = files.find((f) => f.path.includes('conflicted copy'));
       expect(conflictFile).toBeDefined();
+      // Conflict copy holds the local version, original holds remote content
+      expect(await readText(vault, conflictFile!.path)).toBe('local B');
+      expect(await readText(vault, 'notes/both.md')).toBe('remote C');
     });
 
     it('detects rename by hash match and calls rename API', async () => {
@@ -347,7 +384,7 @@ describe('SyncEngine', () => {
       api.conflictResponse = {
         error: 'conflict',
         current_rev: 2,
-        server_sha256: 'abc',
+        server_sha256: await hash('remote content'),
       };
 
       const result = await engine.syncIncremental([
@@ -371,7 +408,7 @@ describe('SyncEngine', () => {
       const conflictText = await readText(vault, conflictFile!.path);
       expect(conflictText).toBe('local new');
 
-      expect(state.files['notes/edit.md'].sha256).toBe('abc');
+      expect(state.files['notes/edit.md'].sha256).toBe(await hash('remote content'));
       expect(state.files['notes/edit.md'].server_rev).toBe(2);
     });
 

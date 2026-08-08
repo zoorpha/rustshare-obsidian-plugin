@@ -167,4 +167,104 @@ describe('SyncQueue', () => {
     // The second flush should NOT have triggered another call
     expect(onSync).toHaveBeenCalledTimes(1);
   });
+
+  it('replays only the ops that did not succeed when a batch partially fails', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+
+    // First batch: the create for /a.md fails (reported via resolve), /b.md succeeds.
+    onSync.mockResolvedValueOnce([{ path: '/a.md', type: 'create' }]);
+    // Retry: everything succeeds.
+    onSync.mockResolvedValueOnce(undefined);
+
+    queue.add({ path: '/a.md', type: 'create' });
+    queue.add({ path: '/b.md', type: 'create' });
+    queue.flush();
+    await Promise.resolve();
+
+    expect(onSync).toHaveBeenCalledTimes(1);
+    expect(onSync.mock.calls[0][0]).toEqual([
+      { path: '/a.md', type: 'create' },
+      { path: '/b.md', type: 'create' },
+    ]);
+
+    // The retry must only contain the failed op — not the one that succeeded.
+    vi.advanceTimersByTime(options.retryBaseDelayMs);
+    await Promise.resolve();
+
+    expect(onSync).toHaveBeenCalledTimes(2);
+    expect(onSync.mock.calls[1][0]).toEqual([{ path: '/a.md', type: 'create' }]);
+    expect(queue.getOfflineQueueCount()).toBe(0);
+
+    vi.restoreAllMocks();
+  });
+
+  it('keeps retrying transient server errors (5xx/429) beyond maxRetries', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const serverError = new Error('HTTP 500: boom');
+    (serverError as { status?: number }).status = 500;
+    onSync.mockRejectedValue(serverError);
+
+    const smallQueue = new SyncQueue({ ...options, maxRetries: 2 }, onSync);
+    smallQueue.start();
+
+    smallQueue.add({ path: '/a.md', type: 'create' });
+    smallQueue.flush();
+    await Promise.resolve();
+
+    // A server error is not "offline".
+    expect(smallQueue.isOnline()).toBe(true);
+    expect(smallQueue.getOfflineQueueCount()).toBe(1);
+
+    // Retries continue past maxRetries (2): initial + 3 retries = 4 calls.
+    vi.advanceTimersByTime(options.retryBaseDelayMs * Math.pow(2, 0)); // base
+    await Promise.resolve();
+    vi.advanceTimersByTime(options.retryBaseDelayMs * Math.pow(2, 1)); // 2*base
+    await Promise.resolve();
+    vi.advanceTimersByTime(options.retryBaseDelayMs * Math.pow(2, 2)); // 4*base
+    await Promise.resolve();
+
+    expect(onSync).toHaveBeenCalledTimes(4);
+
+    smallQueue.stop();
+    vi.restoreAllMocks();
+  });
+
+  it('persists the queued ops and retries them on startup after a reload', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    let persisted: SyncOperation[] = [];
+    const optionsWithPersistence = {
+      ...options,
+      saveQueue: (ops: SyncOperation[]) => { persisted = ops; },
+      loadQueue: () => persisted,
+    };
+
+    const persistQueue = new SyncQueue(optionsWithPersistence, onSync);
+    persistQueue.start();
+
+    const networkError = new Error('Failed to fetch');
+    onSync.mockRejectedValueOnce(networkError);
+
+    persistQueue.add({ path: '/a.md', type: 'delete' });
+    persistQueue.flush();
+    await Promise.resolve();
+
+    expect(persistQueue.getOfflineQueueCount()).toBe(1);
+    expect(persisted).toEqual([{ path: '/a.md', type: 'delete' }]);
+
+    // Simulate a plugin reload: a fresh queue reads the persisted ops.
+    persistQueue.stop();
+    onSync.mockResolvedValue(undefined);
+    const reloaded = new SyncQueue(optionsWithPersistence, onSync);
+    reloaded.start();
+    await Promise.resolve();
+
+    vi.advanceTimersByTime(options.retryBaseDelayMs);
+    await Promise.resolve();
+
+    expect(onSync).toHaveBeenCalledTimes(2);
+    expect(onSync.mock.calls[1][0]).toEqual([{ path: '/a.md', type: 'delete' }]);
+
+    reloaded.stop();
+    vi.restoreAllMocks();
+  });
 });

@@ -1,6 +1,8 @@
 // Obsidian is a trademark of Dynalist Inc. RustShare is not affiliated with, endorsed by, or sponsored by Obsidian.
 // This file is part of RustShare Vault Sync.
 
+import { SyncOperation } from './sync-queue';
+
 export interface RustShareVaultSyncSettings {
   rustshareUrl: string;
   authToken: string;
@@ -14,6 +16,8 @@ export interface RustShareVaultSyncSettings {
   maxRetries: number;
   retryBaseDelayMs: number;
   logSyncEvents: boolean;
+  /** Ops persisted so the sync queue survives a plugin reload. */
+  pendingSyncOps: SyncOperation[];
 }
 
 export const DEFAULT_SETTINGS: RustShareVaultSyncSettings = {
@@ -28,6 +32,7 @@ export const DEFAULT_SETTINGS: RustShareVaultSyncSettings = {
   maxRetries: 5,
   retryBaseDelayMs: 2000,
   logSyncEvents: false,
+  pendingSyncOps: [],
 };
 
 export function validateSettings(settings: Partial<RustShareVaultSyncSettings>): string[] {
