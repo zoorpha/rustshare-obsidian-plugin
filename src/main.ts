@@ -6,6 +6,7 @@ import { RustShareVaultSyncSettings, DEFAULT_SETTINGS } from './settings';
 import { RustShareVaultSyncSettingTab } from './ui/settings-tab';
 import { StatusBar } from './ui/status-bar';
 import { RustShareAPI } from './api';
+import { getOrCreateVault } from './vault-connection';
 import { SyncEngine } from './sync';
 import { SyncState, createEmptySyncState, migrateSyncState, pruneTombstones, retargetSyncStateDevice } from './state';
 import { SyncQueue, SyncOperation } from './sync-queue';
@@ -277,19 +278,17 @@ export default class RustShareVaultSyncPlugin extends Plugin {
         new Notice('Stored vault ID is invalid. Re-connecting and creating a new vault.');
         vaultId = '';
       }
-      if (!vaultId) {
-        const vault = await authedApi.createVault({
-          name: this.app.vault.getName(),
-          adapter: 'ObsidianVault',
-          client_vault_id: undefined,
-          device_id: this.settings.deviceId,
-        });
-        vaultId = vault.id;
+      const { vault, created } = await getOrCreateVault(authedApi, vaultId, {
+        name: this.app.vault.getName(),
+        adapter: 'ObsidianVault',
+        device_id: deviceId,
+      });
+      vaultId = vault.id;
+      if (created) {
         this.settings.vaultId = vaultId;
         await this.saveSettings();
         new Notice(`Created vault: ${vault.name}`);
       } else {
-        const vault = await authedApi.getVault(vaultId);
         new Notice(`Connected to vault: ${vault.name}`);
       }
 

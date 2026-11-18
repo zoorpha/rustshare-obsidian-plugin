@@ -67,6 +67,7 @@ describe('API contract verification', () => {
         expect.fail('expected throw');
       } catch (e: any) {
         expect(e).toBeInstanceOf(Error);
+        expect(e.status).toBe(409);
         expect(e.message).toBe('Conflict detected');
         expect(e.error).toBe('conflict');
         expect(e.path).toBe('/vaults/vault-1/files/notes/test.md');
@@ -114,6 +115,20 @@ describe('API contract verification', () => {
         expect(e.resolution).toBe('download_server_version');
       }
     });
+  });
+
+  it('preserves status codes for HTTP errors', async () => {
+    (requestUrl as ReturnType<typeof vi.fn>).mockResolvedValue(
+      createMockUrlResponse({ status: 404, text: 'Vault not found' })
+    );
+
+    try {
+      await api.getVault('missing-vault');
+      expect.fail('expected throw');
+    } catch (error: any) {
+      expect(error).toBeInstanceOf(Error);
+      expect(error.status).toBe(404);
+    }
   });
 
   describe('Header names', () => {

@@ -187,6 +187,7 @@ export class RustShareAPI {
       };
       const err = new Error(error.message || 'Conflict') as APIError;
       Object.assign(err, error);
+      err.status = 409;
       throw err;
     }
 
@@ -209,7 +210,9 @@ export class RustShareAPI {
     const isOk = response.status >= 200 && response.status < 300;
     if (!isOk) {
       const text = response.text || 'Unknown error';
-      throw new Error(`HTTP ${response.status}: ${text}`);
+      const error = new Error(`HTTP ${response.status}: ${text}`) as APIError;
+      error.status = response.status;
+      throw error;
     }
 
     if (response.status === 204) {

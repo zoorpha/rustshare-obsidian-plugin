@@ -120,6 +120,10 @@ Thumbs.db
 - Ensure you approved the pairing code on the RustShare website
 - Check the Obsidian console (Ctrl/Cmd + Shift + I) for detailed errors
 
+### Connecting to a different RustShare server
+
+Run "Connect or create vault" after changing the server URL. If the saved vault ID is not present on that server, the plugin creates a vault there. If a vault with the same name already exists, rename this Obsidian vault or enter the existing vault ID.
+
 ### Sync seems slow on large vaults
 
 The initial full sync scans and hashes every file. For vaults with thousands of files or large attachments, this may take a minute. Subsequent incremental syncs are much faster.
